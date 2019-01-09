@@ -1,11 +1,14 @@
 #include <EEPROM.h>
 #include "DigitLedDisplay.h"
 
-//how long a standard clock tick is in milliseconds
+//how long half a standard clock tick is (in milliseconds)
 #define HALF_TICK_LENGTH 500
 
-//accelerated clock ticks when button is pressed
+//accelerated clock ticks when button is pressed (in milliseconds)
 #define RAPID_TICK_LENGTH 4
+
+//time to display blinking zeros before resetting (in milliseconds)
+#define RESET_TIME 10000
 
 DigitLedDisplay ld = DigitLedDisplay(14, 10, 15);
 
@@ -13,18 +16,21 @@ int hours = 1;
 int minutes = 0;
 int seconds = 0;
 
+int startup_selection = 0;
+
 void setup() {
 
-  //start timer at 1 hour
-  //every power cycle increment starting hours
-  //cycle back to 1 hour after 4 hours
+  //cycle through various startup time values
   int value = EEPROM.read(0);
-  hours = (value % 4) + 1;
+  startup_selection = (value % 4);
   value++;
   EEPROM.write(0, value);
 
+  //load the timer 
+  load_timer();
+
   //set display brightness (0 to 15)
-  ld.setBright(2);
+  ld.setBright(15);
   //total of 8 digits, indexed from 1
   ld.setDigitLimit(8);
   //debug output
@@ -44,6 +50,17 @@ boolean half_tick = true;
 boolean full_tick = true;
 
 unsigned long int tick_length = 0;
+unsigned long int reset_timer = 0;
+
+void load_timer() {
+  switch (startup_selection) {
+    default:
+    case 0:      hours = 1;      minutes = 0;      seconds = 0;      break;
+    case 1:      hours = 2;      minutes = 0;      seconds = 0;      break;
+    case 2:      hours = 3;      minutes = 0;      seconds = 0;      break;
+    case 3:      hours = 4;      minutes = 0;      seconds = 0;      break;
+  }
+}
 
 void loop() {
 
@@ -59,7 +76,7 @@ void loop() {
   if (millis() - half_clock_tick_time > tick_length) {
     half_clock_tick_time += tick_length;
     half_tick = !half_tick;
-    if (half_tick) full_tick = true;  //every two half ticks issue a full tick
+    if (half_tick) full_tick = true;  //every other half tick is a full tick
   }
 
   if (full_tick) {
@@ -89,6 +106,7 @@ void loop() {
     Serial.print(seconds);
     Serial.println(" ");
 
+    //calculate displayed values
     seconds_left_digit = seconds / 10;
     seconds_right_digit = seconds % 10;
     minutes_left_digit = minutes / 10;
@@ -97,8 +115,9 @@ void loop() {
     hours_right_digit = hours % 10;
   }
 
+  //if we have time anywhere, we are doing a normal countdown
   if ((seconds + hours + minutes ) > 0) {
-    //normal countdown
+    
     send_digit(1, seconds_right_digit);
     send_digit(2, seconds_left_digit);
     send_digit(4, minutes_right_digit);
@@ -106,15 +125,20 @@ void loop() {
     send_digit(7, hours_right_digit);
     send_digit(8, hours_left_digit);
 
-    if (half_tick) {
+    //blink the symbols between digits
+    if (half_tick) { 
       send_digit(3, '-');
       send_digit(6, '-');
     } else {
       send_digit(3, ' ');
       send_digit(6, ' ');
     }
-  } else {
-    //blinking zeros
+
+    //reset deadmans switch
+    reset_timer = millis(); 
+    
+  } else { //timer has ran out, blink zeros
+    
     if (half_tick) {
       send_digit(1, seconds_right_digit);
       send_digit(2, seconds_left_digit);
@@ -130,8 +154,12 @@ void loop() {
       send_digit(7, ' ');
       send_digit(8, ' ');
     }
+    //fixed symbols between digits
     send_digit(3, '-');
     send_digit(6, '-');
+
+    //eventually reset the timer
+    if (millis() - reset_timer > RESET_TIME) load_timer();
   }
 }
 
